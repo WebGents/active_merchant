@@ -70,13 +70,11 @@ module ActiveMerchant
       def store(credit_card, options = {})
         MultiResponse.run do |r|
           r.process { create_store(options) }
-          r.process { authorize_store(r.authorization, credit_card, options)}
-          r.process { create_token(r.authorization, options.merge({id: r.authorization}))}
+          r.process { authorize_store(r.authorization, credit_card, options) }
         end
       end
 
       def unstore(identification)
-        identification = identification.split(";").last
         commit(synchronized_path "/cards/#{identification}/cancel")
       end
 
@@ -124,9 +122,11 @@ module ActiveMerchant
           commit(synchronized_path("/cards/#{identification}/authorize"), post)
         end
 
-        def create_token(identification, options)
+        # Creates a token for use in an operation. Tokens can only be used once
+        # and need to be generated before any operation against a stored card
+        # 'identification' is the ID of the stored card on the gateway. e.g. '1017667'
+        def create_token(identification)
           post = {}
-          post[:id] = options[:id]
           commit(synchronized_path("/cards/#{identification}/tokens"), post)
         end
 
@@ -150,16 +150,14 @@ module ActiveMerchant
 
           Response.new(success, message_from(success, response), response,
             :test => test?,
-            :authorization => authorization_from(response, params[:id])
+            :authorization => authorization_from(response)
           )
         end
 
-        def authorization_from(response, auth_id)
-          if response["token"]
-            "#{response["token"]};#{auth_id}"
-          else
-             response["id"]
-          end
+        # In most cases the response is an ID (payment, card, etc)
+        # In the case of creating a token, it's the token itself we want
+        def authorization_from(response)
+          response.key?('token') ? response['token'] : response['id']
         end
 
         def add_currency(post, money, options)
@@ -203,15 +201,23 @@ module ActiveMerchant
         end
 
         def add_credit_card_or_reference(post, credit_card_or_reference, options = {})
-          post[:card]             ||= {}
-          if credit_card_or_reference.is_a?(String)
-            reference = credit_card_or_reference.split(";").first
-            post[:card][:token] = reference
+          post[:card] ||= {}
+          if credit_card_or_reference.is_a?(String) || credit_card_or_reference.is_a?(Fixnum)
+            # For transactions against a stored card, a token must be included
+            # Tokens can be used once and only once with QuickPay
+            # If the user has their own token for some reason and has passed it as an option, use it
+            # Otherwise, we need to generate one on the gateway.
+            token = options.try(:[], :token) || create_token(credit_card_or_reference).authorization
+            post[:card][:token] = token
           else
             post[:card][:number]     = credit_card_or_reference.number
             post[:card][:cvd]        = credit_card_or_reference.verification_value
             post[:card][:expiration] = expdate(credit_card_or_reference)
             post[:card][:issued_to]  = credit_card_or_reference.name
+          end
+
+          if post[:card].try(:[], :token).blank? && post[:card].try(:[], :number).blank?
+            raise ArgumentError, "No token and no card number provided."
           end
         end
 

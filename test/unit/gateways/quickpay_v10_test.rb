@@ -91,6 +91,7 @@ class QuickpayV10Test < Test::Unit::TestCase
       assert response = @gateway.store(@credit_card, @options)
       assert_success response
       assert response.test?
+      assert_match /\A\d+\z/, response.authorization.to_s
     end.check_request do |endpoint, data, headers|
       assert_match %r{/card}, endpoint
     end.respond_with(successful_store_response, successful_sauthorize_response)

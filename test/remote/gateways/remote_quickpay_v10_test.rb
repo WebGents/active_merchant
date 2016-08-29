@@ -165,11 +165,20 @@ class RemoteQuickPayV10Test < Test::Unit::TestCase
   def test_successful_store
     assert response = @gateway.store(@valid_card, @options)
     assert_success response
+    assert_match /\A\d+\z/, response.authorization.to_s
   end
 
   def test_successful_store_and_reference_purchase
     assert store = @gateway.store(@valid_card, @options)
     assert_success store
+
+    # Try one purchase
+    assert purchase = @gateway.purchase(@amount, store.authorization, @options)
+    assert_success purchase
+
+    # And one more to make sure token issuance is working
+    # Need to generate a new order_id or the gateway will carp
+    @options[:order_id] = generate_unique_id[0...10]
     assert purchase = @gateway.purchase(@amount, store.authorization, @options)
     assert_success purchase
   end
